@@ -28,7 +28,8 @@ const qualityInfoSchema = z.object({
 });
 
 // Infer types
-type QualityInfo = z.infer<typeof qualityInfoSchema>;
+export type QualityInfo = z.infer<typeof qualityInfoSchema>;
+export type Format = z.infer<typeof formatSchema>;
 
 // Define the exact type for this query's key array, including the possibility of undefined URL
 type QualityQueryKey = readonly ['qualityInfo', string | undefined];
