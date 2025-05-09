@@ -11,7 +11,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ReloadIcon } from "@radix-ui/react-icons";
 import { useQualityInfo } from '@/api/quality';
-import type { Format } from '@/api/quality'; // Import QualityInfo type too
+import type { Format } from '@/api/quality';
 
 // Common animation props
 const motionProps = {
