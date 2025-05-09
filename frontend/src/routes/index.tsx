@@ -33,18 +33,41 @@ const qualitySchema = z.object({
 
 // Helper function to create a readable label for a format
 const formatLabel = (format: Format): string => {
+    const parts: string[] = [];
+    parts.push(format.extension.toUpperCase());
+
     if (format.has_video && format.has_audio) {
-        // For formats with both video and audio
-        return `${format.extension.toUpperCase()} Video+Audio (${format.video_height}p, ${format.video_fps}fps, ~${Math.round(format.video_bitrate)}kbps)`;
+        parts.push("Video+Audio");
     } else if (format.has_video) {
-        // For video-only formats
-        return `${format.extension.toUpperCase()} Video Only (${format.video_height}p, ${format.video_fps}fps, ~${Math.round(format.video_bitrate)}kbps)`;
+        parts.push("Video Only");
     } else if (format.has_audio) {
-         // For audio-only formats
-        return `${format.extension.toUpperCase()} Audio Only (${format.audio_codec}, ~${Math.round(format.audio_bitrate)}kbps)`;
+        parts.push("Audio Only");
     }
-    return `${format.extension.toUpperCase()} (Unknown format)`;
+
+    const details: string[] = [];
+    if (format.video_height) details.push(`${format.video_height}p`);
+    if (format.video_fps) details.push(`${format.video_fps}fps`);
+    if (format.video_bitrate) details.push(`~${Math.round(format.video_bitrate / 1000)}kbps Video`); // Convert bps to kbps
+
+    if (format.audio_codec) details.push(`${format.audio_codec}`);
+    if (format.audio_bitrate) details.push(`~${Math.round(format.audio_bitrate / 1000)}kbps Audio`); // Convert bps to kbps
+
+    if (details.length > 0) {
+        parts.push(`(${details.join(', ')})`);
+    } else {
+        // Fallback if no specific details found
+         parts.push('(Details unavailable)');
+    }
+
+    // Append size if available
+    if (format.size) {
+        const sizeMB = (format.size / (1024 * 1024)).toFixed(2);
+        parts.push(`[${sizeMB} MB]`);
+    }
+
+    return parts.join(' ');
 };
+
 
 type FormData = {
   url: string;
@@ -113,7 +136,44 @@ const QualityStep = ({ onNext, onBack, initialData }: StepProps) => {
 
   const onSubmit = (values: z.infer<typeof qualitySchema>) => {
     // values.quality will contain the selected source_identifier
-    onNext({ quality: values.quality });
+    const selectedFormat = qualityData?.formats.find(
+      format => format.source_identifier === values.quality
+    );
+
+    if (selectedFormat) {
+        // Construct the download URL
+        // The download URL needs the original URL, format source, and source_identifier
+        const downloadUrl = `/api/download?url=${encodeURIComponent(initialData.url)}&source=${encodeURIComponent(String(selectedFormat.source))}&source_identifier=${encodeURIComponent(selectedFormat.source_identifier)}`;
+
+        // Initiate the download programmatically
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        // Optionally set the download attribute to suggest a filename
+        if (qualityData?.title && selectedFormat.extension) {
+           link.setAttribute('download', `${qualityData.title}.${selectedFormat.extension}`);
+        } else {
+            link.setAttribute('download', ''); // Suggest browser infer filename
+        }
+
+        // Append to body, click, and remove quickly
+        document.body.appendChild(link);
+        link.click();
+
+        // Clean up the element
+        // Use a small timeout to ensure the click event registers before removal
+        setTimeout(() => {
+            document.body.removeChild(link);
+        }, 10); // 10ms delay
+
+        // Proceed to the next step (CompleteStep) after initiating the download
+        // We pass the selected quality identifier to keep form state consistent
+        onNext({ quality: values.quality });
+
+    } else {
+        console.error("Selected format not found in qualityData:", values.quality);
+        // Optionally handle this error in the UI
+        alert("Selected format details not found. Please try again."); // Simple alert for demo
+    }
   };
 
   // Watch the quality field to reactively enable/disable the button
@@ -121,18 +181,21 @@ const QualityStep = ({ onNext, onBack, initialData }: StepProps) => {
 
   // Filter and sort formats once data is loaded
   const videoFormats = qualityData?.formats
+      // Filter for formats with video (and preferably audio too, or video only if needed)
       .filter(format => format.has_video)
       // Sort video formats by resolution descending
-      .sort((a, b) => b.video_height - a.video_height) || [];
+      .sort((a, b) => (b.video_height ?? 0) - (a.video_height ?? 0)) || []; // Handle null/undefined heights
 
   const audioFormats = qualityData?.formats
+      // Filter for audio-only formats
       .filter(format => format.has_audio && !format.has_video)
        // Sort audio-only formats by bitrate descending
-      .sort((a, b) => b.audio_bitrate - a.audio_bitrate) || [];
+      .sort((a, b) => (b.audio_bitrate ?? 0) - (a.audio_bitrate ?? 0)) || []; // Handle null/undefined bitrates
 
   const hasVideoFormats = videoFormats.length > 0;
   const hasAudioFormats = audioFormats.length > 0;
 
+  const showNoFormatsMessage = !isLoading && !isError && qualityData && !(hasVideoFormats || hasAudioFormats);
 
   return (
     <motion.div {...motionProps} key="quality-form">
@@ -154,16 +217,15 @@ const QualityStep = ({ onNext, onBack, initialData }: StepProps) => {
         </motion.div>
       )}
 
-      {/* Render the form only when qualityData is loaded */}
-      {qualityData && (
+      {/* Render the form only when qualityData is loaded and has formats */}
+      {qualityData && (hasVideoFormats || hasAudioFormats) && (
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
             <Card>
                <CardHeader>
-                   <CardTitle className="text-lg">Available Formats</CardTitle>
+                   <CardTitle className="text-lg">{qualityData.title || "Available Formats"}</CardTitle>
                </CardHeader>
               <CardContent className="pt-6">
-                 {(hasVideoFormats || hasAudioFormats) ? (
                   <FormField
                     control={form.control}
                     name="quality"
@@ -217,10 +279,6 @@ const QualityStep = ({ onNext, onBack, initialData }: StepProps) => {
                       </FormItem>
                     )}
                   />
-                 ) : (
-                   // Message when no video or audio formats are found
-                   !isLoading && !isError && <p className="text-muted-foreground text-center">No suitable video or audio formats found for this URL.</p>
-                 )}
               </CardContent>
             </Card>
 
@@ -247,39 +305,54 @@ const QualityStep = ({ onNext, onBack, initialData }: StepProps) => {
         </Form>
       )}
 
+        {/* Message when no video or audio formats are found */}
+       {showNoFormatsMessage && (
+           <motion.div {...motionProps} key="no-data-found" className="text-muted-foreground text-center py-8">
+               No suitable video or audio formats found for this URL.
+           </motion.div>
+       )}
+
        {/* Message if qualityData is null/undefined and not loading/erroring */}
         {!qualityData && !isLoading && !isError && (
-            <motion.div {...motionProps} key="no-data" className="text-center py-8 text-muted-foreground">
+            <motion.div {...motionProps} key="no-data-initial" className="text-center py-8 text-muted-foreground">
                 Enter a URL to see available quality options.
             </motion.div>
         )}
-
 
     </motion.div>
   );
 };
 
-const CompleteStep = ({ onNext, onBack }: StepProps) => {
+
+const CompleteStep = ({ onNext, onBack, initialData }: StepProps) => {
+  // You could potentially display details about the chosen download here
+  // using initialData if needed, but it's currently just a thank you.
+  console.log("Download initiated for:", initialData); // Log the data passed to the complete step
+
+
   return (
     <motion.div {...motionProps} key="complete" className="text-center space-y-6">
-      <h1 className="text-2xl font-bold">Thank You!</h1>
+      <h1 className="text-2xl font-bold">Download Initiated!</h1>
       <p className="text-muted-foreground">
-        Your download will begin shortly. Thanks for using our service!
+        Your download should begin automatically. If not, check your browser's download manager.
       </p>
+       <p className="text-sm text-gray-500">
+           (Note: Large files may take time to appear or complete.)
+       </p>
       <div className="flex space-x-3">
         <Button
           variant="outline"
           className="flex-1"
-          // Pass empty initialData when going back home
+          // Pass empty initialData when going back home to reset the form state
           onClick={() => onNext({ url: '', quality: undefined })}
         >
-          Go Home
+          Start Over
         </Button>
         <Button
           className="flex-1"
           onClick={onBack}
         >
-          Back
+          Back to Formats
         </Button>
       </div>
     </motion.div>
@@ -293,19 +366,44 @@ export const Route = createFileRoute('/')({
 
 function Index() {
   const [step, setStep] = useState<'url' | 'quality' | 'complete'>('url');
-  const [formData, setFormData] = useState<FormData>({ url: '' });
+  // Use a more robust state for form data
+  const [formData, setFormData] = useState<FormData>(() => {
+      // Attempt to load from local storage or default
+      try {
+          const savedData = localStorage.getItem('downloaderFormData');
+          return savedData ? JSON.parse(savedData) : { url: '', quality: undefined };
+      } catch (e) {
+          console.error("Failed to load form data from local storage:", e);
+          return { url: '', quality: undefined };
+      }
+  });
+
+  // Save form data to local storage whenever it changes
+  useState(() => {
+    try {
+       localStorage.setItem('downloaderFormData', JSON.stringify(formData));
+    } catch (e) {
+        console.error("Failed to save form data to local storage:", e);
+        // This can happen if local storage is disabled or full
+    }
+  }, [formData]);
+
 
   const handleNext = (data: Partial<FormData>) => {
-    setFormData(prev => ({ ...prev, ...data }));
-    if (step === 'url') setStep('quality');
-    else if (step === 'quality') {
-       // Here you would typically trigger the actual download using the selected quality (data.quality)
-       console.log("Simulating download with data:", { url: formData.url, selectedFormatId: data.quality });
-       setStep('complete');
-    }
-    else if (step === 'complete') {
+    const newData = { ...formData, ...data };
+    setFormData(newData);
+
+    if (step === 'url') {
+        // Reset quality when going from URL to Quality step for a new URL
+        setFormData({ ...newData, quality: undefined });
+        setStep('quality');
+    } else if (step === 'quality') {
+        // The download is initiated in the QualityStep's onSubmit.
+        // We just transition the step here.
+        setStep('complete');
+    } else if (step === 'complete') {
       // Reset form data when going back to step 1 from complete
-      setFormData({ url: '' });
+      // We already set { url: '', quality: undefined } in the CompleteStep's onNext call
       setStep('url');
     }
   };
@@ -322,6 +420,7 @@ function Index() {
           <UrlStep
             onNext={handleNext}
             initialData={formData}
+            key="step-url" // Add key for AnimatePresence
           />
         )}
         {step === 'quality' && (
@@ -329,13 +428,15 @@ function Index() {
             onNext={handleNext}
             onBack={handleBack}
             initialData={formData}
+             key="step-quality" // Add key for AnimatePresence
           />
         )}
         {step === 'complete' && (
           <CompleteStep
             onNext={handleNext}
             onBack={handleBack}
-            initialData={formData} // Pass initialData, though not used by CompleteStep
+            initialData={formData} // Pass initialData, can be useful to show what was downloaded
+             key="step-complete" // Add key for AnimatePresence
           />
         )}
       </AnimatePresence>
