@@ -6,7 +6,7 @@ import (
 	"io"
 	"media-downloader/internal/media/info"
 	"media-downloader/internal/media/sources"
-	"media-downloader/internal/media/youtube"
+	"media-downloader/internal/media/ytdlp"
 )
 
 func FetchMedia(ctx context.Context, url string) (*info.Media, error) {
@@ -14,7 +14,7 @@ func FetchMedia(ctx context.Context, url string) (*info.Media, error) {
 
 	switch source {
 	case sources.YouTube:
-		return youtube.FetchMedia(ctx, url)
+		return ytdlp.GetAvailableFormats(url)
 	default:
 		return nil, fmt.Errorf("unsupported source: %s", source)
 	}
@@ -22,8 +22,8 @@ func FetchMedia(ctx context.Context, url string) (*info.Media, error) {
 
 func DownloadMedia(ctx context.Context, url string, source sources.Source, sourceIdentifier string) (*info.Media, *info.Format, io.ReadCloser, error) {
 	switch source {
-	case sources.YouTube:
-		return youtube.DownloadMedia(ctx, url, sourceIdentifier)
+	//case sources.YouTube:
+	//return youtube.DownloadMedia(ctx, url, sourceIdentifier)
 	default:
 		return nil, nil, nil, fmt.Errorf("unsupported source: %s", source)
 	}

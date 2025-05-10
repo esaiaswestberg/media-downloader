@@ -7,25 +7,32 @@ import (
 )
 
 type Media struct {
-	Url      string   `json:"url"`
-	Title    string   `json:"title"`
-	Duration float64  `json:"duration"`
-	Formats  []Format `json:"formats"`
+	Url          string        `json:"url"`
+	Title        string        `json:"title"`
+	Duration     float64       `json:"duration"`
+	VideoFormats []VideoFormat `json:"video_formats"`
+	AudioFormats []AudioFormat `json:"audio_formats"`
 }
 
-type Format struct {
-	HasVideo     bool    `json:"has_video"`
+type VideoFormat struct {
 	VideoCodec   string  `json:"video_codec"`
 	VideoBitrate float64 `json:"video_bitrate"`
 	VideoWidth   int     `json:"video_width"`
 	VideoHeight  int     `json:"video_height"`
 	VideoFPS     float64 `json:"video_fps"`
 
-	HasAudio        bool    `json:"has_audio"`
+	Format
+}
+
+type AudioFormat struct {
 	AudioCodec      string  `json:"audio_codec"`
 	AudioBitrate    float64 `json:"audio_bitrate"`
 	AudioSampleRate float64 `json:"audio_sample_rate"`
 
+	Format
+}
+
+type Format struct {
 	Extension string `json:"extension"`
 	Size      uint64 `json:"size"`
 
@@ -34,15 +41,20 @@ type Format struct {
 }
 
 func (m *Media) CleanFormats() {
-	// Remove formats that are not usable
-	m.Formats = slice.Filter(m.Formats, func(format Format) bool {
-		// Require either video or audio
-		if !format.HasVideo && !format.HasAudio {
+	// Remove unsupported video formats
+	m.VideoFormats = slice.Filter(m.VideoFormats, func(format VideoFormat) bool {
+		// Require a bitrate above zero
+		if format.VideoBitrate <= 0 {
 			return false
 		}
 
-		// Require video or audio bitrate above zero
-		if format.VideoBitrate <= 0 && format.AudioBitrate <= 0 {
+		return true
+	})
+
+	// Remove unsupported audio formats
+	m.AudioFormats = slice.Filter(m.AudioFormats, func(format AudioFormat) bool {
+		// Require a bitrate above zero
+		if format.AudioBitrate <= 0 {
 			return false
 		}
 
@@ -51,27 +63,31 @@ func (m *Media) CleanFormats() {
 }
 
 func (m *Media) SortFormats() {
-	sort.Slice(m.Formats, func(a, b int) bool {
-		aFormat := m.Formats[a]
-		bFormat := m.Formats[b]
-
-		// Sort by audio-only first
-		if aFormat.HasVideo && !bFormat.HasVideo {
-			return false
-		} else if !aFormat.HasVideo && bFormat.HasVideo {
-			return true
+	// Sort video formats by resolution, bitrate and file size
+	sort.Slice(m.VideoFormats, func(i, j int) bool {
+		iRes := m.VideoFormats[i].VideoWidth * m.VideoFormats[i].VideoHeight
+		jRes := m.VideoFormats[j].VideoWidth * m.VideoFormats[j].VideoHeight
+		if iRes != jRes {
+			return iRes > jRes
 		}
 
-		// Sort videos
-		if aFormat.HasVideo && bFormat.HasVideo {
-			return aFormat.VideoBitrate > bFormat.VideoBitrate
+		iBitrate := m.VideoFormats[i].VideoBitrate
+		jBitrate := m.VideoFormats[j].VideoBitrate
+		if iBitrate != jBitrate {
+			return iBitrate > jBitrate
 		}
 
-		// Sort audio-only
-		if aFormat.HasAudio && bFormat.HasAudio {
-			return aFormat.AudioBitrate > bFormat.AudioBitrate
+		return m.VideoFormats[i].Size > m.VideoFormats[j].Size
+	})
+
+	// Sort audio formats by bitrate and file size
+	sort.Slice(m.AudioFormats, func(i, j int) bool {
+		iBitrate := m.AudioFormats[i].AudioBitrate
+		jBitrate := m.AudioFormats[j].AudioBitrate
+		if iBitrate != jBitrate {
+			return iBitrate > jBitrate
 		}
 
-		return false
+		return m.AudioFormats[i].Size > m.AudioFormats[j].Size
 	})
 }
